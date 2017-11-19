@@ -3,3 +3,7 @@ youtube-dl --list-formats https://www.youtube.com/watch?v=u68EWmtKZw0
 youtube-dl -f 137  https://www.youtube.com/watch?v=u68EWmtKZw0^C
 
 ffmpeg -i times_square.mp4 -r .5 -q:v 1 -qmax 1 %d.png
+ffmpeg -i times_square.mp4 -r 2 -q:v 1 -qmax 1 %d.png
+
+ffmpeg -r 2 -f image2 -i %d.png -vcodec libx264 -crf 5 times_higher_dpi.mp4
+
