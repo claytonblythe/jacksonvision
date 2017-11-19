@@ -1,27 +1,27 @@
 
-# Object Detection Demo
-Welcome to the object detection inference walkthrough!  This notebook will walk you step by step through the process of using a pre-trained model to detect objects in an image. Make sure to follow the [installation instructions](https://github.com/tensorflow/models/blob/master/research/object_detection/g3doc/installation.md) before you start.
+# JacksonVision Detection Demo
+This repo is built upon the Tensorflow Objection Detection API, allowing for easy downloading and implementation of state-of-the-art object detection models.Make sure to follow the [installation instructions](https://github.com/tensorflow/models/blob/master/research/object_detection/g3doc/installation.md) before you start.
 
 # Imports
 
 
 ```python
+from collections import defaultdict
+import imageio
+from io import StringIO
+from matplotlib import pyplot as plt
 import numpy as np
 import os
 import six.moves.urllib as urllib
 import sys
 import tarfile
 import tensorflow as tf
+import time
+
 import zipfile
 
-from collections import defaultdict
-from io import StringIO
-from matplotlib import pyplot as plt
-from PIL import Image
-
 if tf.__version__ != '1.4.0':
-  raise ImportError('Please upgrade your tensorflow installation to v1.4.0!')
-
+    raise ImportError('Please upgrade your tensorflow installation to v1.4.0!')
 ```
 
 ## Env setup
@@ -30,18 +30,9 @@ if tf.__version__ != '1.4.0':
 ```python
 # This is needed to display the images.
 %matplotlib inline
-
 # This is needed since the notebook is stored in the object_detection folder.
 sys.path.append("..")
-```
-
-## Object detection imports
-Here are the imports from the object detection module.
-
-
-```python
 from utils import label_map_util
-
 from utils import visualization_utils as vis_util
 ```
 
@@ -56,7 +47,9 @@ By default we use an "SSD with Mobilenet" model here. See the [detection model z
 
 ```python
 # What model to download.
-MODEL_NAME = 'ssd_mobilenet_v1_coco_2017_11_17'
+# MODEL_NAME = 'faster_rcnn_resnet101_lowproposals_coco_2017_11_08' # .17 seconds for forward pass of one image tensor, NVIDIA P600 GPU
+# MODEL_NAME = 'ssd_mobilenet_v1_coco_2017_11_17' # .06 seconds for forward pass
+MODEL_NAME = 'faster_rcnn_nas_lowproposals_coco_2017_11_08' #SOTA result is roughly .43 s for forward pass
 MODEL_FILE = MODEL_NAME + '.tar.gz'
 DOWNLOAD_BASE = 'http://download.tensorflow.org/models/object_detection/'
 
@@ -65,7 +58,6 @@ PATH_TO_CKPT = MODEL_NAME + '/frozen_inference_graph.pb'
 
 # List of the strings that is used to add correct label for each box.
 PATH_TO_LABELS = os.path.join('data', 'mscoco_label_map.pbtxt')
-
 NUM_CLASSES = 90
 ```
 
@@ -77,9 +69,9 @@ opener = urllib.request.URLopener()
 opener.retrieve(DOWNLOAD_BASE + MODEL_FILE, MODEL_FILE)
 tar_file = tarfile.open(MODEL_FILE)
 for file in tar_file.getmembers():
-  file_name = os.path.basename(file.name)
-  if 'frozen_inference_graph.pb' in file_name:
-    tar_file.extract(file, os.getcwd())
+    file_name = os.path.basename(file.name)
+    if 'frozen_inference_graph.pb' in file_name:
+        tar_file.extract(file, os.getcwd())
 ```
 
 ## Load a (frozen) Tensorflow model into memory.
@@ -88,11 +80,11 @@ for file in tar_file.getmembers():
 ```python
 detection_graph = tf.Graph()
 with detection_graph.as_default():
-  od_graph_def = tf.GraphDef()
-  with tf.gfile.GFile(PATH_TO_CKPT, 'rb') as fid:
-    serialized_graph = fid.read()
-    od_graph_def.ParseFromString(serialized_graph)
-    tf.import_graph_def(od_graph_def, name='')
+    od_graph_def = tf.GraphDef()
+    with tf.gfile.GFile(PATH_TO_CKPT, 'rb') as fid:
+        serialized_graph = fid.read()
+        od_graph_def.ParseFromString(serialized_graph)
+        tf.import_graph_def(od_graph_def, name='')
 ```
 
 ## Loading label map
@@ -105,16 +97,6 @@ categories = label_map_util.convert_label_map_to_categories(label_map, max_num_c
 category_index = label_map_util.create_category_index(categories)
 ```
 
-## Helper code
-
-
-```python
-def load_image_into_numpy_array(image):
-  (im_width, im_height) = image.size
-  return np.array(image.getdata()).reshape(
-      (im_height, im_width, 3)).astype(np.uint8)
-```
-
 # Detection
 
 
@@ -123,26 +105,15 @@ def load_image_into_numpy_array(image):
 # image1.jpg
 # image2.jpg
 # If you want to test the code with your images, just add path to the images to the TEST_IMAGE_PATHS.
-PATH_TO_TEST_IMAGES_DIR = 'test_images'
+PATH_TO_TEST_IMAGES_DIR = '/mnt/passport/jacksonvision_images'
 TEST_IMAGE_PATHS = [ os.path.join(PATH_TO_TEST_IMAGES_DIR, '{}.png'.format(i)) for i in range(1, 11) ]
 
 # Size, in inches, of the output images.
-IMAGE_SIZE = (12, 8)
+IMAGE_SIZE = (48, 32)
 ```
 
 
 ```python
-import time
-```
-
-
-```python
- import PIL.ImageFont as ImageFont
-```
-
-
-```python
-now = time.time()
 with detection_graph.as_default():
     with tf.Session(graph=detection_graph) as sess:
     # Definite input and output Tensors for detection_graph
@@ -155,17 +126,21 @@ with detection_graph.as_default():
         detection_classes = detection_graph.get_tensor_by_name('detection_classes:0')
         num_detections = detection_graph.get_tensor_by_name('num_detections:0')
         for image_path in TEST_IMAGE_PATHS:
-            image = Image.open(image_path)
-            # the array based representation of the image will be used later in order to prepare the
-            # result image with boxes and labels on it.
-            image_np = load_image_into_numpy_array(image)
+            # Preprocessing begins
+            begin_img_tonumpy = time.time()
+            # imageio module will load directly to numpy array
+            image_np = imageio.imread(image_path)
+            print("Time to convert img to numpy: {} seconds".format(round(time.time() - begin_img_tonumpy, 3)))
             # Expand dimensions since the model expects images to have shape: [1, None, None, 3]
             image_np_expanded = np.expand_dims(image_np, axis=0)
             # Actual detection.
+            now = time.time()
             (boxes, scores, classes, num) = sess.run(
               [detection_boxes, detection_scores, detection_classes, num_detections],
               feed_dict={image_tensor: image_np_expanded})
+            print("Time for forward pass: {} seconds".format(round(time.time() - now, 3)))
             # Visualization of the results of a detection.
+            now = time.time()
             vis_util.visualize_boxes_and_labels_on_image_array(
               image_np,
               np.squeeze(boxes),
@@ -173,51 +148,81 @@ with detection_graph.as_default():
               np.squeeze(scores),
               category_index,
               use_normalized_coordinates=True,
-              line_thickness=8)
+              line_thickness=7)
+            print("Time for postprocessing: {} seconds".format(round(time.time() - now, 3)))
             plt.figure(figsize=IMAGE_SIZE)
             plt.imshow(image_np)
-print(time.time() - now)
+            plt.savefig('/home/cblythe2/github/jacksonvision/figures/boxed/{}'.format(os.path.basename(image_path)))
 ```
 
-    34.41788101196289
+    Time to convert img to numpy: 0.099 seconds
+    Time for forward pass: 3.356 seconds
+    Time for postprocessing: 0.271 seconds
+    Time to convert img to numpy: 0.065 seconds
+    Time for forward pass: 0.419 seconds
+    Time for postprocessing: 0.262 seconds
+    Time to convert img to numpy: 0.065 seconds
+    Time for forward pass: 0.42 seconds
+    Time for postprocessing: 0.262 seconds
+    Time to convert img to numpy: 0.068 seconds
+    Time for forward pass: 0.408 seconds
+    Time for postprocessing: 0.265 seconds
+    Time to convert img to numpy: 0.064 seconds
+    Time for forward pass: 0.417 seconds
+    Time for postprocessing: 0.265 seconds
+    Time to convert img to numpy: 0.066 seconds
+    Time for forward pass: 0.421 seconds
+    Time for postprocessing: 0.268 seconds
+    Time to convert img to numpy: 0.071 seconds
+    Time for forward pass: 0.421 seconds
+    Time for postprocessing: 0.232 seconds
+    Time to convert img to numpy: 0.07 seconds
+    Time for forward pass: 0.417 seconds
+    Time for postprocessing: 0.177 seconds
+    Time to convert img to numpy: 0.07 seconds
+    Time for forward pass: 0.417 seconds
+    Time for postprocessing: 0.246 seconds
+    Time to convert img to numpy: 0.069 seconds
+    Time for forward pass: 0.409 seconds
+    Time for postprocessing: 0.251 seconds
 
 
 
-![png](object_detection_tutorial_files/object_detection_tutorial_22_1.png)
+![png](object_detection_tutorial_files/object_detection_tutorial_16_1.png)
 
 
 
-![png](object_detection_tutorial_files/object_detection_tutorial_22_2.png)
+![png](object_detection_tutorial_files/object_detection_tutorial_16_2.png)
 
 
 
-![png](object_detection_tutorial_files/object_detection_tutorial_22_3.png)
+![png](object_detection_tutorial_files/object_detection_tutorial_16_3.png)
 
 
 
-![png](object_detection_tutorial_files/object_detection_tutorial_22_4.png)
+![png](object_detection_tutorial_files/object_detection_tutorial_16_4.png)
 
 
 
-![png](object_detection_tutorial_files/object_detection_tutorial_22_5.png)
+![png](object_detection_tutorial_files/object_detection_tutorial_16_5.png)
 
 
 
-![png](object_detection_tutorial_files/object_detection_tutorial_22_6.png)
+![png](object_detection_tutorial_files/object_detection_tutorial_16_6.png)
 
 
 
-![png](object_detection_tutorial_files/object_detection_tutorial_22_7.png)
+![png](object_detection_tutorial_files/object_detection_tutorial_16_7.png)
 
 
 
-![png](object_detection_tutorial_files/object_detection_tutorial_22_8.png)
+![png](object_detection_tutorial_files/object_detection_tutorial_16_8.png)
 
 
 
-![png](object_detection_tutorial_files/object_detection_tutorial_22_9.png)
+![png](object_detection_tutorial_files/object_detection_tutorial_16_9.png)
 
 
 
-![png](object_detection_tutorial_files/object_detection_tutorial_22_10.png)
+![png](object_detection_tutorial_files/object_detection_tutorial_16_10.png)
 
